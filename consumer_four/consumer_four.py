@@ -1,41 +1,38 @@
 import pymongo
-import time
 import pika
+import time
 import json
 import logging
 logging.basicConfig(level=logging.INFO)
-mongo_client = pymongo.MongoClient("mongodb://database")
-db = mongo_client["studentdatabase"]
+
+time.sleep(9)
+# Establish connection to MongoDB
+client = pymongo.MongoClient("mongodb://database")
+db = client["studentdatabase"]
 collection = db["students"]
-
-def delete_student(srn):
-    query = {"srn": srn}
-    result = collection.delete_one(query)
-    return result.deleted_count > 0
-
 print('172.17.0.1')
 time.sleep(9)
+
 
 # Establish connection with RabbitMQ
 credentials = pika.PlainCredentials('guest','guest')
 parameters = pika.ConnectionParameters('172.17.0.1',5672,'/',credentials,heartbeat=1200)
 connection = pika.BlockingConnection(parameters)
 channel = connection.channel()
+# Declare queue and bind to exchange
+channel.queue_declare(queue='read_database')
+channel.queue_bind(queue='read_database', exchange='student_management', routing_key='read_database')
 
-
-# Declare queue and callback function
-channel.queue_declare(queue='delete_record')
-
-def callback(ch, method, properties, body):
-    data = json.loads(body)
-    logging.info("Received delete record message: %s",data)
-    srn = data['srn']
-    if delete_student(srn):
-        logging.info(f"Deleted record with SRN: %s",data)
-    else:
-        logging.info(f"Record with SRN %S not found",data)
+# Define callback function for reading from database
+def read_database_callback(ch, method, properties, body):
+    # Retrieve all documents in the collection
+    documents = collection.find()
+    # Print each document
+    for document in documents:
+        logging.info("%s",document)
     ch.basic_ack(delivery_tag=method.delivery_tag)
-    
-channel.basic_consume(queue='delete_record', on_message_callback=callback)
-print('Waiting for delete record messages...')
+# Consume messages from queue
+channel.basic_consume(queue='read_database', on_message_callback=read_database_callback)
+
+# Start consuming messages
 channel.start_consuming()
